@@ -37,6 +37,15 @@ std::unique_ptr<Agent> make_warden();
 std::unique_ptr<Agent> make_cartograph();
 std::unique_ptr<Agent> make_scribe();
 std::unique_ptr<Agent> make_sommelier();
+std::unique_ptr<Agent> make_herald();
+std::unique_ptr<Agent> make_sentinel();
+std::unique_ptr<Agent> make_carpenter();
+std::unique_ptr<Agent> make_echo_ear();
+std::unique_ptr<Agent> make_echo_mouth();
+std::unique_ptr<Agent> make_anvil();
+std::unique_ptr<Agent> make_quartermaster();
+std::unique_ptr<Agent> make_magistrate();
+std::unique_ptr<Agent> make_librarian();
 std::unique_ptr<Agent> make_stdout_sink();
 }  // namespace
 
@@ -58,6 +67,15 @@ int main() {
     rt.register_agent(specialists::make_cartograph());
     rt.register_agent(specialists::make_scribe());
     rt.register_agent(specialists::make_sommelier());
+    rt.register_agent(specialists::make_herald());
+    rt.register_agent(specialists::make_sentinel());
+    rt.register_agent(specialists::make_carpenter());
+    rt.register_agent(specialists::make_echo_ear());
+    rt.register_agent(specialists::make_echo_mouth());
+    rt.register_agent(specialists::make_anvil());
+    rt.register_agent(specialists::make_quartermaster());
+    rt.register_agent(specialists::make_magistrate());
+    rt.register_agent(specialists::make_librarian());
     rt.register_agent(specialists::make_stdout_sink());
     rt.set_audit("scribe");  // journal every routed message
 
@@ -69,6 +87,7 @@ int main() {
             "  tool: <tool> [k=v ...]  -> forge (via warden)\n"
             "  remember: <text>  -> cartograph\n"
             "  recall: <query>   -> cartograph\n"
+            "  discord: <channel_id> <text>  -> herald\n"
             "  quit / Ctrl-D to exit\n\n");
 
         std::string line;
@@ -102,7 +121,8 @@ int main() {
                         start = sp + 1;
                     }
                 }
-                nlohmann::json body = {{"tool", tool}, {"args", args}};
+                nlohmann::json body = {{"tool", tool}, {"args", args},
+                                       {"reason", "interactive-user"}};
                 rt.send({.from="stdout", .to="forge",
                          .kind="tool_call", .payload=body.dump()});
             }
@@ -138,6 +158,21 @@ int main() {
                 nlohmann::json body = {{"query", q}, {"k", 3}};
                 rt.send({.from="stdout", .to="cartograph",
                          .kind="recall", .payload=body.dump()});
+            }
+            else if (line.rfind("discord:", 0) == 0) {
+                // discord: <channel_id> <text...>
+                std::string rest = line.substr(8);
+                while (!rest.empty() && rest.front() == ' ') rest.erase(rest.begin());
+                auto sp = rest.find(' ');
+                if (sp == std::string::npos) {
+                    std::fprintf(stderr, "usage: discord: <channel_id> <text>\n");
+                    continue;
+                }
+                std::string channel = rest.substr(0, sp);
+                std::string text    = rest.substr(sp + 1);
+                nlohmann::json body = {{"channel_id", channel}, {"content", text}};
+                rt.send({.from="stdout", .to="herald",
+                         .kind="discord_post", .payload=body.dump()});
             }
             else {
                 rt.send({.from="stdout", .to="muse",
