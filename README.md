@@ -22,7 +22,12 @@ blaster). agent-cpp is the nervous system; rocm-cpp is the brain.
 5. **BitNet / 1-bit only as the inference brain.** The default backend
    is `librocm_cpp`. No FP16 LLMs, no GGUF glue, no alternative quant
    schemes in-tree. If you want llama.cpp compat, fork this repo.
-6. **MIT / BSD / Apache only.** No GPL contagion.
+6. **MIT / BSD / Apache / zlib only.** No GPL contagion.
+7. **UI stack is fixed:** **FTXUI** for the terminal / over-SSH interface,
+   **Dear ImGui + SDL2** for the desktop interface (floating tabs,
+   frosted-glass, GPU-shaded wallpaper). Both talk to the same
+   librocm_cpp HTTP server — one backend, two renderers. No Qt, no
+   Electron, no web-based UI.
 
 PRs that violate any of the above will be closed without debate.
 
