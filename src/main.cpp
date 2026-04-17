@@ -36,6 +36,7 @@ std::unique_ptr<Agent> make_forge();
 std::unique_ptr<Agent> make_warden();
 std::unique_ptr<Agent> make_cartograph();
 std::unique_ptr<Agent> make_scribe();
+std::unique_ptr<Agent> make_sommelier();
 std::unique_ptr<Agent> make_stdout_sink();
 }  // namespace
 
@@ -56,6 +57,7 @@ int main() {
     rt.register_agent(specialists::make_warden());
     rt.register_agent(specialists::make_cartograph());
     rt.register_agent(specialists::make_scribe());
+    rt.register_agent(specialists::make_sommelier());
     rt.register_agent(specialists::make_stdout_sink());
     rt.set_audit("scribe");  // journal every routed message
 
@@ -103,6 +105,25 @@ int main() {
                 nlohmann::json body = {{"tool", tool}, {"args", args}};
                 rt.send({.from="stdout", .to="forge",
                          .kind="tool_call", .payload=body.dump()});
+            }
+            else if (line.rfind("route:", 0) == 0) {
+                // route: <hint> <prompt>
+                std::string rest = line.substr(6);
+                while (!rest.empty() && rest.front() == ' ') rest.erase(rest.begin());
+                auto sp = rest.find(' ');
+                std::string hint = (sp == std::string::npos) ? rest : rest.substr(0, sp);
+                std::string prompt = (sp == std::string::npos) ? "" : rest.substr(sp + 1);
+                nlohmann::json body = {
+                    {"hint",       hint},
+                    {"max_tokens", 120},
+                    {"messages", {{{"role","user"},{"content",prompt}}}},
+                };
+                rt.send({.from="stdout", .to="sommelier",
+                         .kind="decode_request", .payload=body.dump()});
+            }
+            else if (line == "backends") {
+                rt.send({.from="stdout", .to="sommelier",
+                         .kind="list_backends", .payload="{}"});
             }
             else if (line.rfind("remember:", 0) == 0) {
                 std::string text = line.substr(9);

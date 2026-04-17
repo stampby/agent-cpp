@@ -44,17 +44,26 @@ struct ChatResult {
 
 class LLMClient {
 public:
-    // base_url like "http://127.0.0.1:8080"
-    explicit LLMClient(std::string base_url = "http://127.0.0.1:8080")
-        : base_url_(std::move(base_url)) {
+    // base_url like "http://127.0.0.1:8080". If api_key is non-empty,
+    // a Bearer authorization header is added to every request — covers
+    // OpenAI, Groq, DeepSeek, OpenRouter, and any other OpenAI-compat
+    // endpoint that uses Bearer auth.
+    explicit LLMClient(std::string base_url = "http://127.0.0.1:8080",
+                       std::string api_key = "",
+                       std::string model_id = "bitnet-b1.58-2b-4t")
+        : base_url_(std::move(base_url)), api_key_(std::move(api_key)),
+          model_id_(std::move(model_id)) {
         parse_(base_url_, host_, port_);
     }
+
+    const std::string& base_url() const { return base_url_; }
+    const std::string& model_id() const { return model_id_; }
 
     ChatResult chat(const std::vector<ChatMessage>& msgs,
                     const ChatOptions& opts = {}) const
     {
         nlohmann::json body;
-        body["model"]       = "bitnet-b1.58-2b-4t";
+        body["model"]       = model_id_;
         body["max_tokens"]  = opts.max_tokens;
         body["temperature"] = opts.temperature;
         body["top_p"]       = opts.top_p;
@@ -68,8 +77,12 @@ public:
         cli.set_connection_timeout(10);
         cli.set_read_timeout(300);
 
+        httplib::Headers headers{{"Content-Type", "application/json"}};
+        if (!api_key_.empty())
+            headers.emplace("Authorization", "Bearer " + api_key_);
+
         ChatResult r;
-        auto res = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+        auto res = cli.Post("/v1/chat/completions", headers, body.dump(), "application/json");
         if (!res) { r.error = "cannot reach " + base_url_; return r; }
         if (res->status != 200) {
             r.error = "HTTP " + std::to_string(res->status) + ": " + res->body;
@@ -91,6 +104,8 @@ public:
 
 private:
     std::string base_url_;
+    std::string api_key_;
+    std::string model_id_;
     std::string host_;
     int         port_ = 8080;
 
