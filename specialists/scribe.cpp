@@ -5,6 +5,10 @@
 // gives you a trail for debugging, lets cartograph ingest history
 // later if needed.
 //
+// Each entry carries {prev, hash} — SHA-256 of (prev + canonical body).
+// Tamper with any past line and every downstream hash stops matching.
+// Cheap audit trail, no blockchain theatre.
+//
 // Contract:
 //   listens for : anything — silently filters to "interesting" kinds
 //                 "session_new"   starts a fresh log file
@@ -27,6 +31,7 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <openssl/evp.h>
 #include <string>
 #include <unordered_set>
 
@@ -51,6 +56,22 @@ std::string timestamp_tag() {
     char buf[32];
     std::strftime(buf, sizeof(buf), "%Y%m%d-%H%M%S", std::localtime(&t));
     return buf;
+}
+
+std::string sha256_hex(const std::string& in) {
+    unsigned char md[EVP_MAX_MD_SIZE]; unsigned int md_len = 0;
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(ctx, in.data(), in.size());
+    EVP_DigestFinal_ex(ctx, md, &md_len);
+    EVP_MD_CTX_free(ctx);
+    static const char hex[] = "0123456789abcdef";
+    std::string out; out.resize(md_len * 2);
+    for (unsigned i = 0; i < md_len; ++i) {
+        out[2*i]     = hex[md[i] >> 4];
+        out[2*i + 1] = hex[md[i] & 0xf];
+    }
+    return out;
 }
 
 // Kinds we bother persisting. Debug chatter like "exec_allow" stays
@@ -87,7 +108,7 @@ public:
         }
         if (!interesting_kinds().count(msg.kind)) return;
 
-        nlohmann::json entry = {
+        nlohmann::json body = {
             {"ts",      std::chrono::duration_cast<std::chrono::milliseconds>(
                             msg.ts.time_since_epoch()).count()},
             {"id",      msg.id},
@@ -98,10 +119,15 @@ public:
         };
 
         std::lock_guard<std::mutex> lk(mu_);
-        if (file_.is_open()) {
-            file_ << entry.dump() << "\n";
-            file_.flush();  // crash-safe by default
-        }
+        if (!file_.is_open()) return;
+        std::string body_s = body.dump();
+        std::string hash   = sha256_hex(prev_hash_ + body_s);
+        nlohmann::json entry = {
+            {"prev", prev_hash_}, {"hash", hash}, {"body", body},
+        };
+        file_ << entry.dump() << "\n";
+        file_.flush();  // crash-safe by default
+        prev_hash_ = hash;
     }
 
     void stop() override {
@@ -114,6 +140,7 @@ private:
     std::mutex                  mu_;
     std::filesystem::path       path_;
     std::ofstream               file_;
+    std::string                 prev_hash_;  // running tamper-evident chain
 
     void open_new_session_() {
         auto dir = session_root();
@@ -130,6 +157,15 @@ private:
             std::fprintf(stderr, "[scribe] cannot open %s\n", path_.c_str());
             return;
         }
+        // Genesis line — seeds the hash chain with the session path + time.
+        // Any later tampering with history breaks the chain from here on.
+        std::string seed = path_.string() + ":" + timestamp_tag();
+        prev_hash_ = sha256_hex("genesis:" + seed);
+        nlohmann::json genesis = {
+            {"prev", ""}, {"hash", prev_hash_},
+            {"body", {{"kind", "session_start"}, {"seed", seed}}},
+        };
+        file_ << genesis.dump() << "\n"; file_.flush();
         std::fprintf(stderr, "[scribe] session log: %s\n", path_.c_str());
     }
 };

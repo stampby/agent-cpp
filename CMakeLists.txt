@@ -17,7 +17,8 @@ target_include_directories(agent_cpp_core PUBLIC include)
 target_compile_options(agent_cpp_core PRIVATE -Wall -Wextra -Wpedantic)
 
 find_package(Threads REQUIRED)
-target_link_libraries(agent_cpp_core PUBLIC Threads::Threads)
+find_package(OpenSSL REQUIRED)  # scribe hash-chain; herald HTTPS; sentinel WSS
+target_link_libraries(agent_cpp_core PUBLIC Threads::Threads OpenSSL::SSL OpenSSL::Crypto)
 
 # Header-only HTTP + JSON — specialists use these to talk to the
 # rocm-cpp OpenAI-compat endpoint and parse/emit JSON messages.
