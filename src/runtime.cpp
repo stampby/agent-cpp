@@ -32,11 +32,24 @@ bool Runtime::send(Message msg) {
         return false;
     }
     msg.id = next_id_.fetch_add(1);
+    Message audit_copy;
+    bool do_audit = !audit_.empty() && audit_ != msg.to && agents_.count(audit_);
+    if (do_audit) audit_copy = msg;   // pre-move copy
     {
         std::lock_guard<std::mutex> lk(it->second->m);
         it->second->q.push(std::move(msg));
     }
     it->second->cv.notify_one();
+    if (do_audit) {
+        auto ait = agents_.find(audit_);
+        if (ait != agents_.end()) {
+            {
+                std::lock_guard<std::mutex> lk(ait->second->m);
+                ait->second->q.push(std::move(audit_copy));
+            }
+            ait->second->cv.notify_one();
+        }
+    }
     return true;
 }
 

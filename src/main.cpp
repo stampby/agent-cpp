@@ -35,6 +35,7 @@ std::unique_ptr<Agent> make_planner();
 std::unique_ptr<Agent> make_forge();
 std::unique_ptr<Agent> make_warden();
 std::unique_ptr<Agent> make_cartograph();
+std::unique_ptr<Agent> make_scribe();
 std::unique_ptr<Agent> make_stdout_sink();
 }  // namespace
 
@@ -54,7 +55,9 @@ int main() {
     rt.register_agent(specialists::make_forge());
     rt.register_agent(specialists::make_warden());
     rt.register_agent(specialists::make_cartograph());
+    rt.register_agent(specialists::make_scribe());
     rt.register_agent(specialists::make_stdout_sink());
+    rt.set_audit("scribe");  // journal every routed message
 
     std::thread stdin_thr([&] {
         std::fprintf(stderr,

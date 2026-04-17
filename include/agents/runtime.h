@@ -49,6 +49,11 @@ public:
     // joins threads. Idempotent.
     void shutdown();
 
+    // Optional "tap" — if set, every successfully-routed message is
+    // also delivered as a copy to the named agent (typically "scribe"
+    // for session logging). Set BEFORE run(). Empty string disables.
+    void set_audit(std::string agent_name) { audit_ = std::move(agent_name); }
+
 private:
     struct Mailbox {
         std::mutex m;
@@ -64,6 +69,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> stopping_{false};
     std::atomic<uint64_t> next_id_{1};
+    std::string audit_;
 };
 
 }  // namespace rocm_cpp::agents
