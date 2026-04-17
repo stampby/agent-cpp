@@ -29,9 +29,16 @@ FetchContent_Declare(cpp_httplib
 FetchContent_Declare(nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
     GIT_TAG        v3.11.3)
-FetchContent_MakeAvailable(cpp_httplib nlohmann_json)
+# usearch — single-header ANN index (MIT, Apache-2 dual, zero-dep)
+FetchContent_Declare(usearch
+    GIT_REPOSITORY https://github.com/unum-cloud/usearch.git
+    GIT_TAG        v2.20.1)
+set(USEARCH_BUILD_TEST_CPP   OFF CACHE INTERNAL "")
+set(USEARCH_BUILD_BENCH_CPP  OFF CACHE INTERNAL "")
+set(USEARCH_BUILD_LIB_C      OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(cpp_httplib nlohmann_json usearch)
 target_link_libraries(agent_cpp_core PUBLIC
-    httplib::httplib nlohmann_json::nlohmann_json)
+    httplib::httplib nlohmann_json::nlohmann_json usearch::usearch)
 
 # ---- Specialists (snap in, snap out) ---------------------------------------
 # Each new specialist adds ONE line here. If yours needs more (deps, flags),
@@ -41,7 +48,7 @@ add_library(agent_cpp_specialists STATIC
     specialists/stdout_sink.cpp
     # — core cognition —
     specialists/scribe.cpp
-    specialists/cartograph.cpp
+    specialists/cartograph.cpp   # usearch-backed memory (real)
     specialists/forge.cpp
     specialists/warden.cpp
     specialists/planner.cpp

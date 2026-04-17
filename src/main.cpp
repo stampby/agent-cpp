@@ -34,6 +34,7 @@ std::unique_ptr<Agent> make_muse();
 std::unique_ptr<Agent> make_planner();
 std::unique_ptr<Agent> make_forge();
 std::unique_ptr<Agent> make_warden();
+std::unique_ptr<Agent> make_cartograph();
 std::unique_ptr<Agent> make_stdout_sink();
 }  // namespace
 
@@ -52,14 +53,17 @@ int main() {
     rt.register_agent(specialists::make_planner());
     rt.register_agent(specialists::make_forge());
     rt.register_agent(specialists::make_warden());
+    rt.register_agent(specialists::make_cartograph());
     rt.register_agent(specialists::make_stdout_sink());
 
     std::thread stdin_thr([&] {
         std::fprintf(stderr,
-            "agent-cpp: prefix a line with 'plan:', 'tool:', or nothing.\n"
+            "agent-cpp: prefix a line with 'plan:', 'tool:', 'remember:', 'recall:', or nothing.\n"
             "  <text>            -> muse (chat)\n"
             "  plan: <goal>      -> planner\n"
             "  tool: <tool> [k=v ...]  -> forge (via warden)\n"
+            "  remember: <text>  -> cartograph\n"
+            "  recall: <query>   -> cartograph\n"
             "  quit / Ctrl-D to exit\n\n");
 
         std::string line;
@@ -96,6 +100,20 @@ int main() {
                 nlohmann::json body = {{"tool", tool}, {"args", args}};
                 rt.send({.from="stdout", .to="forge",
                          .kind="tool_call", .payload=body.dump()});
+            }
+            else if (line.rfind("remember:", 0) == 0) {
+                std::string text = line.substr(9);
+                while (!text.empty() && text.front() == ' ') text.erase(text.begin());
+                nlohmann::json body = {{"text", text}};
+                rt.send({.from="stdout", .to="cartograph",
+                         .kind="remember", .payload=body.dump()});
+            }
+            else if (line.rfind("recall:", 0) == 0) {
+                std::string q = line.substr(7);
+                while (!q.empty() && q.front() == ' ') q.erase(q.begin());
+                nlohmann::json body = {{"query", q}, {"k", 3}};
+                rt.send({.from="stdout", .to="cartograph",
+                         .kind="recall", .payload=body.dump()});
             }
             else {
                 rt.send({.from="stdout", .to="muse",
