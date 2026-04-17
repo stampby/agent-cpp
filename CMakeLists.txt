@@ -19,6 +19,20 @@ target_compile_options(agent_cpp_core PRIVATE -Wall -Wextra -Wpedantic)
 find_package(Threads REQUIRED)
 target_link_libraries(agent_cpp_core PUBLIC Threads::Threads)
 
+# Header-only HTTP + JSON — specialists use these to talk to the
+# rocm-cpp OpenAI-compat endpoint and parse/emit JSON messages.
+# Runtime stays dependency-free beyond libc + pthreads after build.
+include(FetchContent)
+FetchContent_Declare(cpp_httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        v0.18.1)
+FetchContent_Declare(nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3)
+FetchContent_MakeAvailable(cpp_httplib nlohmann_json)
+target_link_libraries(agent_cpp_core PUBLIC
+    httplib::httplib nlohmann_json::nlohmann_json)
+
 # ---- Specialists (snap in, snap out) ---------------------------------------
 # Each new specialist adds ONE line here. If yours needs more (deps, flags),
 # factor it out into specialists/your_name/CMakeLists.txt and add_subdirectory.
