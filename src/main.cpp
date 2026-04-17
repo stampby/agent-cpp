@@ -28,6 +28,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
+#include <unistd.h>    // isatty, STDIN_FILENO
 
 namespace rocm_cpp::agents::specialists {
 std::unique_ptr<Agent> make_muse();
@@ -79,7 +80,23 @@ int main() {
     rt.register_agent(specialists::make_stdout_sink());
     rt.set_audit("scribe");  // journal every routed message
 
-    std::thread stdin_thr([&] {
+    // --- headless mode detection --------------------------------------------
+    // If stdin isn't a terminal (e.g. systemd attached /dev/null) or the env
+    // var AGENT_CPP_HEADLESS is set, skip the interactive stdin loop entirely.
+    // The bus keeps running until SIGTERM; external specialists (sentinel,
+    // Discord webhooks, future HTTP endpoints) drive the work.
+    const char* env_headless = std::getenv("AGENT_CPP_HEADLESS");
+    bool headless = (env_headless && *env_headless && std::string(env_headless) != "0")
+                 || !isatty(STDIN_FILENO);
+
+    std::thread stdin_thr;
+    if (headless) {
+        std::fprintf(stderr,
+            "[agent-cpp] headless mode — stdin loop disabled, bus runs until SIGTERM\n");
+        std::fprintf(stderr,
+            "[agent-cpp] %d specialists live, audit -> scribe\n", 17);
+    } else {
+        stdin_thr = std::thread([&] {
         std::fprintf(stderr,
             "agent-cpp: prefix a line with 'plan:', 'tool:', 'remember:', 'recall:', or nothing.\n"
             "  <text>            -> muse (chat)\n"
@@ -184,7 +201,8 @@ int main() {
         std::fprintf(stderr, "\n[agent-cpp] draining inboxes (10s)…\n");
         std::this_thread::sleep_for(std::chrono::seconds(10));
         rt.shutdown();
-    });
+        });
+    }
 
     rt.run();
     if (stdin_thr.joinable()) stdin_thr.detach();
