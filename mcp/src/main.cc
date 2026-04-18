@@ -45,6 +45,10 @@ std::unique_ptr<Agent> make_cartograph();
 std::unique_ptr<Agent> make_sentinel();
 std::unique_ptr<Agent> make_forge();
 std::unique_ptr<Agent> make_warden();
+std::unique_ptr<Agent> make_muse();
+std::unique_ptr<Agent> make_sommelier();
+std::unique_ptr<Agent> make_echo_mouth();
+std::unique_ptr<Agent> make_quartermaster();
 }  // namespace rocm_cpp::agents::specialists
 
 namespace {
@@ -98,8 +102,12 @@ int main() {
     maybe_register("librarian",   rocm_cpp::agents::specialists::make_librarian());
     maybe_register("cartograph",  rocm_cpp::agents::specialists::make_cartograph());
     maybe_register("sentinel",    rocm_cpp::agents::specialists::make_sentinel());
-    maybe_register("warden",      rocm_cpp::agents::specialists::make_warden());
-    maybe_register("forge",       rocm_cpp::agents::specialists::make_forge());
+    maybe_register("warden",        rocm_cpp::agents::specialists::make_warden());
+    maybe_register("forge",         rocm_cpp::agents::specialists::make_forge());
+    maybe_register("muse",          rocm_cpp::agents::specialists::make_muse());
+    maybe_register("sommelier",     rocm_cpp::agents::specialists::make_sommelier());
+    maybe_register("echo_mouth",    rocm_cpp::agents::specialists::make_echo_mouth());
+    maybe_register("quartermaster", rocm_cpp::agents::specialists::make_quartermaster());
 
     runtime.set_audit("scribe");   // journal every routed message through scribe
 

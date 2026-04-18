@@ -126,6 +126,108 @@ ToolRegistry make_default_registry() {
         .is_write = false,
     });
 
+    // ── sommelier (external-API backend selector) ───────────────────
+    r.register_tool(Tool{
+        .name = "sommelier_list_backends",
+        .description = "List the external LLM / API backends sommelier knows about and their status.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", json::object()},
+            {"required", json::array()},
+        },
+        .target_agent = "sommelier",
+        .message_kind = "list_backends",
+        .is_write = false,
+    });
+
+    // ── muse (chat specialist) ──────────────────────────────────────
+    r.register_tool(Tool{
+        .name = "muse_reset",
+        .description = "Clear muse's running conversation state and start a fresh chat thread.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", json::object()},
+            {"required", json::array()},
+        },
+        .target_agent = "muse",
+        .message_kind = "reset",
+        .is_write = true,
+    });
+
+    // ── sentinel (Discord watcher) ──────────────────────────────────
+    r.register_tool(Tool{
+        .name = "sentinel_watch_channel",
+        .description = "Add a Discord channel to sentinel's active watch list. Requires DISCORD_TOKEN.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {{"channel_id", {{"type", "string"}}}}},
+            {"required", json::array({"channel_id"})},
+        },
+        .target_agent = "sentinel",
+        .message_kind = "sentinel_watch",
+        .is_write = true,
+    });
+
+    r.register_tool(Tool{
+        .name = "sentinel_unwatch_channel",
+        .description = "Remove a Discord channel from sentinel's active watch list.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {{"channel_id", {{"type", "string"}}}}},
+            {"required", json::array({"channel_id"})},
+        },
+        .target_agent = "sentinel",
+        .message_kind = "sentinel_unwatch",
+        .is_write = true,
+    });
+
+    r.register_tool(Tool{
+        .name = "sentinel_reconnect",
+        .description = "Force sentinel's Discord WebSocket to reconnect. Useful after credential rotation.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", json::object()},
+            {"required", json::array()},
+        },
+        .target_agent = "sentinel",
+        .message_kind = "reconnect",
+        .is_write = true,
+    });
+
+    // ── echo_mouth (TTS output) ─────────────────────────────────────
+    r.register_tool(Tool{
+        .name = "echo_mouth_say",
+        .description = "Speak text via the TTS backend (kokoro by default). Requires the TTS service to be running.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"text", {{"type", "string"}}},
+                {"voice", {{"type", "string"}, {"description", "optional voice name"}}},
+            }},
+            {"required", json::array({"text"})},
+        },
+        .target_agent = "echo_mouth",
+        .message_kind = "tts_say",
+        .is_write = true,
+    });
+
+    // ── quartermaster (GitHub triage) ───────────────────────────────
+    r.register_tool(Tool{
+        .name = "quartermaster_triage_issue",
+        .description = "Run LLM-backed triage on a GitHub issue — labels, severity, owner suggestion.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"repo", {{"type", "string"}, {"description", "owner/repo"}}},
+                {"number", {{"type", "integer"}}},
+            }},
+            {"required", json::array({"repo", "number"})},
+        },
+        .target_agent = "quartermaster",
+        .message_kind = "github_issue_triage",
+        .is_write = false,
+    });
+
     return r;
 }
 
