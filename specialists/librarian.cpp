@@ -26,11 +26,17 @@
 #include "agents/runtime.h"
 #include "agents/github_client.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <system_error>
+#include <vector>
 
 namespace rocm_cpp::agents::specialists {
 
@@ -93,6 +99,7 @@ public:
     void handle(const Message& msg, Runtime& rt) override {
         if (msg.kind == "github_release") return on_release_(msg, rt);
         if (msg.kind == "github_push_main") return on_push_(msg, rt);
+        if (msg.kind == "search_docs") return on_search_docs_(msg, rt);
         // docs_refresh_request is reserved; no v1 behaviour yet.
     }
 
@@ -105,6 +112,88 @@ private:
         nlohmann::json jj = {{"error", why}};
         rt.send({.from=name_, .to=src.from,
                  .kind="librarian_error", .payload=jj.dump()});
+    }
+
+    // Simple filesystem-backed docs search. DOCS_ROOT env var or "root"
+    // field in the request payload selects the tree; walks *.md/*.mdx/*.txt
+    // recursively and returns hits ranked by match count. No index — this is
+    // meant for small personal doc trees, not huge wikis. For bigger corpora,
+    // future work: vectorize with halo-brain's FTS5 or an ANN index.
+    void on_search_docs_(const Message& msg, Runtime& rt) {
+        nlohmann::json j;
+        try { j = nlohmann::json::parse(msg.payload); }
+        catch (const std::exception& e) {
+            err_(rt, msg, std::string("bad JSON: ") + e.what()); return;
+        }
+        std::string query = j.value("query", std::string(""));
+        if (query.empty()) { err_(rt, msg, "query required"); return; }
+        int limit = std::max(1, std::min(j.value("limit", 10), 100));
+
+        std::string root = j.value("root", std::string(""));
+        if (root.empty()) {
+            if (const char* r = std::getenv("DOCS_ROOT"); r && *r) root = r;
+            else root = std::string(std::getenv("HOME") ? std::getenv("HOME") : ".") + "/docs";
+        }
+
+        std::string needle; needle.reserve(query.size());
+        for (char c : query) needle += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        struct Hit { std::string path; int line; std::string snippet; int score; };
+        std::vector<Hit> hits;
+
+        std::error_code ec;
+        if (!std::filesystem::exists(root, ec)) {
+            nlohmann::json r = {{"hits", nlohmann::json::array()}, {"root", root},
+                                {"note", "docs root does not exist"}};
+            rt.send({.from=name_, .to=msg.from,
+                     .kind="search_docs_result", .payload=r.dump()});
+            return;
+        }
+
+        for (auto& entry : std::filesystem::recursive_directory_iterator(root, ec)) {
+            if (ec) break;
+            if (!entry.is_regular_file(ec)) continue;
+            const auto ext = entry.path().extension().string();
+            if (ext != ".md" && ext != ".mdx" && ext != ".txt") continue;
+
+            std::ifstream in(entry.path());
+            if (!in) continue;
+            std::string line;
+            int lineno = 0;
+            int file_hits = 0;
+            std::string best_snippet;
+            int best_line = 0;
+            while (std::getline(in, line)) {
+                ++lineno;
+                std::string low; low.reserve(line.size());
+                for (char c : line) low += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (low.find(needle) != std::string::npos) {
+                    ++file_hits;
+                    if (best_snippet.empty()) {
+                        best_snippet = line.substr(0, 200);
+                        best_line = lineno;
+                    }
+                }
+            }
+            if (file_hits > 0) {
+                hits.push_back({entry.path().string(), best_line, best_snippet, file_hits});
+            }
+        }
+
+        std::sort(hits.begin(), hits.end(),
+                  [](const Hit& a, const Hit& b){ return a.score > b.score; });
+        if (static_cast<int>(hits.size()) > limit) hits.resize(limit);
+
+        nlohmann::json out_hits = nlohmann::json::array();
+        for (const auto& h : hits) {
+            out_hits.push_back({
+                {"path", h.path}, {"line", h.line},
+                {"snippet", h.snippet}, {"score", h.score},
+            });
+        }
+        nlohmann::json r = {{"hits", out_hits}, {"root", root}, {"query", query}};
+        rt.send({.from=name_, .to=msg.from,
+                 .kind="search_docs_result", .payload=r.dump()});
     }
 
     void on_release_(const Message& msg, Runtime& rt) {

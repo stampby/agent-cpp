@@ -297,6 +297,39 @@ ToolRegistry make_default_registry() {
     });
 
     r.register_tool(Tool{
+        .name = "librarian_search_docs",
+        .description = "Search a local docs directory for a query. Walks *.md/*.mdx/*.txt. DOCS_ROOT env var or 'root' arg overrides the default.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"query", {{"type", "string"}}},
+                {"limit", {{"type", "integer"}, {"default", 10}, {"maximum", 100}}},
+                {"root",  {{"type", "string"}, {"description", "override DOCS_ROOT"}}},
+            }},
+            {"required", json::array({"query"})},
+        },
+        .target_agent = "librarian",
+        .message_kind = "search_docs",
+        .is_write = false,
+    });
+
+    r.register_tool(Tool{
+        .name = "sentinel_fetch_recent",
+        .description = "Fetch the last N messages from a Discord channel via REST. Requires DISCORD_TOKEN.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"channel_id", {{"type", "string"}}},
+                {"limit", {{"type", "integer"}, {"default", 25}, {"maximum", 100}}},
+            }},
+            {"required", json::array({"channel_id"})},
+        },
+        .target_agent = "sentinel",
+        .message_kind = "fetch_recent",
+        .is_write = false,
+    });
+
+    r.register_tool(Tool{
         .name = "github_search_repo",
         .description = "Search within a repository. kind ∈ {code, issues, commits}.",
         .input_schema = json{
@@ -310,6 +343,72 @@ ToolRegistry make_default_registry() {
         },
         .target_agent = "quartermaster",
         .message_kind = "github_search_repo",
+        .is_write = false,
+    });
+
+    // ── google_sommelier (Drive / Gmail / Calendar read-focused) ────
+    // Bearer token: GOOGLE_ACCESS_TOKEN env var, or falls back to shelling
+    // out to `gcloud auth application-default print-access-token`. User
+    // runs `gcloud auth application-default login` once to set up.
+    r.register_tool(Tool{
+        .name = "google_drive_search",
+        .description = "Search Google Drive by name + full text. Optional mime_type filter (e.g. application/pdf).",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"query",     {{"type", "string"}}},
+                {"limit",     {{"type", "integer"}, {"default", 20}, {"maximum", 100}}},
+                {"mime_type", {{"type", "string"}}},
+            }},
+            {"required", json::array({"query"})},
+        },
+        .target_agent = "google_sommelier",
+        .message_kind = "gdrive_search",
+        .is_write = false,
+    });
+
+    r.register_tool(Tool{
+        .name = "google_drive_read",
+        .description = "Read the contents of a Drive file. Google Docs export to Markdown, Sheets to CSV, Slides to text; others raw. Cap 500 KB.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {{"file_id", {{"type", "string"}}}}},
+            {"required", json::array({"file_id"})},
+        },
+        .target_agent = "google_sommelier",
+        .message_kind = "gdrive_read",
+        .is_write = false,
+    });
+
+    r.register_tool(Tool{
+        .name = "google_gmail_search",
+        .description = "Search Gmail with standard Gmail query syntax (from:, subject:, has:attachment, label:, after:, etc.).",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"query", {{"type", "string"}}},
+                {"limit", {{"type", "integer"}, {"default", 20}, {"maximum", 100}}},
+            }},
+            {"required", json::array({"query"})},
+        },
+        .target_agent = "google_sommelier",
+        .message_kind = "gmail_search",
+        .is_write = false,
+    });
+
+    r.register_tool(Tool{
+        .name = "google_calendar_upcoming",
+        .description = "List upcoming Google Calendar events from now to now+hours_ahead (default 24). calendar_id defaults to 'primary'.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"calendar_id", {{"type", "string"}, {"default", "primary"}}},
+                {"hours_ahead", {{"type", "integer"}, {"default", 24}, {"maximum", 720}}},
+            }},
+            {"required", json::array()},
+        },
+        .target_agent = "google_sommelier",
+        .message_kind = "gcal_upcoming",
         .is_write = false,
     });
 

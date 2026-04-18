@@ -76,7 +76,7 @@ public:
         if (poll_thr_.joinable()) poll_thr_.join();
     }
 
-    void handle(const Message& msg, Runtime& /*rt*/) override {
+    void handle(const Message& msg, Runtime& rt) override {
         if (msg.kind == "sentinel_watch" || msg.kind == "sentinel_unwatch") {
             nlohmann::json j;
             try { j = nlohmann::json::parse(msg.payload); } catch (...) { return; }
@@ -92,7 +92,9 @@ public:
             std::lock_guard<std::mutex> lk(mu_);
             last_id_.clear();      // re-sync against "now"
             cv_.notify_all();
+            return;
         }
+        if (msg.kind == "fetch_recent") return fetch_recent_(msg, rt);
     }
 
 private:
@@ -125,6 +127,61 @@ private:
             cv_.wait_for(lk, std::chrono::milliseconds(poll_ms_),
                          [&]{ return !running_; });
         }
+    }
+
+    // Synchronous "give me the last N messages" for MCP tool callers.
+    // Separate from the poll_loop_ — does one REST call, returns the
+    // raw Discord messages array. No bus event dedup.
+    void fetch_recent_(const Message& msg, Runtime& rt) {
+        nlohmann::json j;
+        try { j = nlohmann::json::parse(msg.payload); }
+        catch (const std::exception& e) {
+            nlohmann::json er = {{"error", std::string("bad JSON: ") + e.what()}};
+            rt.send({.from=name_, .to=msg.from, .kind="fetch_recent_error", .payload=er.dump()});
+            return;
+        }
+        std::string channel = j.value("channel_id", std::string(""));
+        int limit = std::max(1, std::min(j.value("limit", 25), 100));
+        if (channel.empty()) {
+            nlohmann::json er = {{"error", "channel_id required"}};
+            rt.send({.from=name_, .to=msg.from, .kind="fetch_recent_error", .payload=er.dump()});
+            return;
+        }
+        if (token_.empty()) {
+            nlohmann::json er = {{"error", "DISCORD_TOKEN not set"}};
+            rt.send({.from=name_, .to=msg.from, .kind="fetch_recent_error", .payload=er.dump()});
+            return;
+        }
+
+        httplib::Client cli("https://discord.com");
+        cli.set_connection_timeout(5);
+        cli.set_read_timeout(15);
+        httplib::Headers headers{
+            {"Authorization", "Bot " + token_},
+            {"User-Agent",    "agent-cpp/sentinel"},
+        };
+        std::string path = "/api/v10/channels/" + channel + "/messages?limit=" + std::to_string(limit);
+        auto res = cli.Get(path, headers);
+        if (!res) {
+            nlohmann::json er = {{"error", "Discord unreachable"}};
+            rt.send({.from=name_, .to=msg.from, .kind="fetch_recent_error", .payload=er.dump()});
+            return;
+        }
+        if (res->status < 200 || res->status >= 300) {
+            nlohmann::json er = {{"error", "HTTP " + std::to_string(res->status)},
+                                 {"body", res->body.substr(0, 300)}};
+            rt.send({.from=name_, .to=msg.from, .kind="fetch_recent_error", .payload=er.dump()});
+            return;
+        }
+        nlohmann::json data;
+        try { data = nlohmann::json::parse(res->body); }
+        catch (const std::exception& e) {
+            nlohmann::json er = {{"error", std::string("parse: ") + e.what()}};
+            rt.send({.from=name_, .to=msg.from, .kind="fetch_recent_error", .payload=er.dump()});
+            return;
+        }
+        nlohmann::json out = {{"channel_id", channel}, {"messages", data}};
+        rt.send({.from=name_, .to=msg.from, .kind="fetch_recent_result", .payload=out.dump()});
     }
 
     void poll_channel_(Runtime& rt, const std::string& channel) {
