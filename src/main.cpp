@@ -44,6 +44,7 @@ std::unique_ptr<Agent> make_carpenter();
 std::unique_ptr<Agent> make_echo_ear();
 std::unique_ptr<Agent> make_echo_mouth();
 std::unique_ptr<Agent> make_anvil();
+std::unique_ptr<Agent> make_gateway();
 std::unique_ptr<Agent> make_quartermaster();
 std::unique_ptr<Agent> make_magistrate();
 std::unique_ptr<Agent> make_librarian();
@@ -74,6 +75,7 @@ int main() {
     rt.register_agent(specialists::make_echo_ear());
     rt.register_agent(specialists::make_echo_mouth());
     rt.register_agent(specialists::make_anvil());
+    rt.register_agent(specialists::make_gateway());
     rt.register_agent(specialists::make_quartermaster());
     rt.register_agent(specialists::make_magistrate());
     rt.register_agent(specialists::make_librarian());

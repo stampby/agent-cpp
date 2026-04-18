@@ -66,7 +66,8 @@ add_library(agent_cpp_specialists STATIC
     specialists/librarian.cpp
     # — ops / support —
     specialists/anvil.cpp
-    specialists/carpenter.cpp)
+    specialists/carpenter.cpp
+    specialists/gateway.cpp)
 target_link_libraries(agent_cpp_specialists PUBLIC agent_cpp_core)
 target_compile_options(agent_cpp_specialists PRIVATE -Wall -Wextra)
 
