@@ -228,6 +228,91 @@ ToolRegistry make_default_registry() {
         .is_write = false,
     });
 
+    // ── quartermaster GitHub CRUD ───────────────────────────────────
+    r.register_tool(Tool{
+        .name = "github_create_issue",
+        .description = "Create a new issue on a repo. Write — requires GH_TOKEN. CVG-gated in Phase 2.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"repo",   {{"type", "string"}, {"description", "owner/repo"}}},
+                {"title",  {{"type", "string"}}},
+                {"body",   {{"type", "string"}}},
+                {"labels", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+            }},
+            {"required", json::array({"repo", "title"})},
+        },
+        .target_agent = "quartermaster",
+        .message_kind = "github_create_issue",
+        .is_write = true,
+    });
+
+    r.register_tool(Tool{
+        .name = "github_comment",
+        .description = "Post a comment on an issue or PR. Write — requires GH_TOKEN.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"repo",   {{"type", "string"}}},
+                {"number", {{"type", "integer"}}},
+                {"body",   {{"type", "string"}}},
+            }},
+            {"required", json::array({"repo", "number", "body"})},
+        },
+        .target_agent = "quartermaster",
+        .message_kind = "github_comment",
+        .is_write = true,
+    });
+
+    r.register_tool(Tool{
+        .name = "github_review_pr",
+        .description = "Fetch PR metadata, diff file list, and comments in one call. Read-only.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"repo",      {{"type", "string"}}},
+                {"pr_number", {{"type", "integer"}}},
+            }},
+            {"required", json::array({"repo", "pr_number"})},
+        },
+        .target_agent = "quartermaster",
+        .message_kind = "github_review_pr",
+        .is_write = false,
+    });
+
+    r.register_tool(Tool{
+        .name = "github_list_prs",
+        .description = "List pull requests for a repo.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"repo",  {{"type", "string"}}},
+                {"state", {{"type", "string"}, {"enum", {"open", "closed", "all"}}, {"default", "open"}}},
+            }},
+            {"required", json::array({"repo"})},
+        },
+        .target_agent = "quartermaster",
+        .message_kind = "github_list_prs",
+        .is_write = false,
+    });
+
+    r.register_tool(Tool{
+        .name = "github_search_repo",
+        .description = "Search within a repository. kind ∈ {code, issues, commits}.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"repo",  {{"type", "string"}}},
+                {"query", {{"type", "string"}}},
+                {"kind",  {{"type", "string"}, {"enum", {"code", "issues", "commits"}}, {"default", "code"}}},
+            }},
+            {"required", json::array({"repo", "query"})},
+        },
+        .target_agent = "quartermaster",
+        .message_kind = "github_search_repo",
+        .is_write = false,
+    });
+
     return r;
 }
 

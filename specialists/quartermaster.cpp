@@ -82,6 +82,11 @@ public:
     const std::string& name() const override { return name_; }
 
     void handle(const Message& msg, Runtime& rt) override {
+        if (msg.kind == "github_create_issue") { create_issue_(msg, rt); return; }
+        if (msg.kind == "github_comment")      { comment_(msg, rt); return; }
+        if (msg.kind == "github_review_pr")    { review_pr_(msg, rt); return; }
+        if (msg.kind == "github_list_prs")     { list_prs_(msg, rt); return; }
+        if (msg.kind == "github_search_repo")  { search_repo_(msg, rt); return; }
         if (msg.kind != "github_issue_opened" &&
             msg.kind != "github_issue_triage") return;
 
@@ -151,6 +156,85 @@ private:
         nlohmann::json jj = {{"error", why}};
         rt.send({.from=name_, .to=src.from,
                  .kind="triage_error", .payload=jj.dump()});
+    }
+
+    // Reply helper used by the GitHub CRUD handlers below. The caller
+    // gets a generic {ok, data/error} envelope under kind=<original>_result,
+    // so MCP clients can read the response shape without per-tool knowledge.
+    void reply_(Runtime& rt, const Message& src, const std::string& kind,
+                const nlohmann::json& body) {
+        rt.send({.from=name_, .to=src.from, .kind=kind, .payload=body.dump()});
+    }
+
+    // ── GitHub CRUD via github_client ────────────────────────────────
+
+    void create_issue_(const Message& msg, Runtime& rt) {
+        nlohmann::json j; try { j = nlohmann::json::parse(msg.payload); }
+        catch (const std::exception& e) { err_(rt, msg, std::string("bad JSON: ") + e.what()); return; }
+        const std::string repo = j.value("repo", std::string(""));
+        if (repo.empty()) { err_(rt, msg, "repo required"); return; }
+        nlohmann::json body;
+        body["title"] = j.value("title", std::string(""));
+        if (j.contains("body"))   body["body"]   = j["body"];
+        if (j.contains("labels")) body["labels"] = j["labels"];
+        auto resp = gh_.post("/repos/" + repo + "/issues", body);
+        reply_(rt, msg, "github_create_issue_result",
+               {{"ok", !resp.contains("error")}, {"data", resp}});
+    }
+
+    void comment_(const Message& msg, Runtime& rt) {
+        nlohmann::json j; try { j = nlohmann::json::parse(msg.payload); }
+        catch (const std::exception& e) { err_(rt, msg, std::string("bad JSON: ") + e.what()); return; }
+        const std::string repo = j.value("repo", std::string(""));
+        int number = j.value("number", 0);
+        if (repo.empty() || number <= 0) { err_(rt, msg, "repo + number required"); return; }
+        nlohmann::json body = {{"body", j.value("body", std::string(""))}};
+        auto resp = gh_.post("/repos/" + repo + "/issues/" + std::to_string(number) + "/comments", body);
+        reply_(rt, msg, "github_comment_result",
+               {{"ok", !resp.contains("error")}, {"data", resp}});
+    }
+
+    void review_pr_(const Message& msg, Runtime& rt) {
+        nlohmann::json j; try { j = nlohmann::json::parse(msg.payload); }
+        catch (const std::exception& e) { err_(rt, msg, std::string("bad JSON: ") + e.what()); return; }
+        const std::string repo = j.value("repo", std::string(""));
+        int number = j.value("pr_number", j.value("number", 0));
+        if (repo.empty() || number <= 0) { err_(rt, msg, "repo + pr_number required"); return; }
+        const std::string base = "/repos/" + repo + "/pulls/" + std::to_string(number);
+        auto pr       = gh_.get(base);
+        auto comments = gh_.get(base + "/comments");
+        auto files    = gh_.get(base + "/files");
+        reply_(rt, msg, "github_review_pr_result",
+               {{"ok", !pr.contains("error")},
+                {"pr", pr}, {"comments", comments}, {"files", files}});
+    }
+
+    void list_prs_(const Message& msg, Runtime& rt) {
+        nlohmann::json j; try { j = nlohmann::json::parse(msg.payload); }
+        catch (const std::exception& e) { err_(rt, msg, std::string("bad JSON: ") + e.what()); return; }
+        const std::string repo  = j.value("repo",  std::string(""));
+        const std::string state = j.value("state", std::string("open"));
+        if (repo.empty()) { err_(rt, msg, "repo required"); return; }
+        auto resp = gh_.get("/repos/" + repo + "/pulls?state=" + state);
+        reply_(rt, msg, "github_list_prs_result",
+               {{"ok", !resp.contains("error")}, {"data", resp}});
+    }
+
+    void search_repo_(const Message& msg, Runtime& rt) {
+        nlohmann::json j; try { j = nlohmann::json::parse(msg.payload); }
+        catch (const std::exception& e) { err_(rt, msg, std::string("bad JSON: ") + e.what()); return; }
+        const std::string repo  = j.value("repo",  std::string(""));
+        const std::string query = j.value("query", std::string(""));
+        const std::string kind  = j.value("kind",  std::string("code"));
+        if (repo.empty() || query.empty()) { err_(rt, msg, "repo + query required"); return; }
+        std::string path;
+        if (kind == "code")         path = "/search/code?q=" + query + "+repo:" + repo;
+        else if (kind == "issues")  path = "/search/issues?q=" + query + "+repo:" + repo;
+        else if (kind == "commits") path = "/search/commits?q=" + query + "+repo:" + repo;
+        else                        path = "/search/code?q=" + query + "+repo:" + repo;
+        auto resp = gh_.get(path);
+        reply_(rt, msg, "github_search_repo_result",
+               {{"ok", !resp.contains("error")}, {"data", resp}});
     }
 };
 
