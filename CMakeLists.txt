@@ -54,7 +54,6 @@ add_library(agent_cpp_specialists STATIC
     specialists/warden.cpp
     specialists/planner.cpp
     specialists/sommelier.cpp
-    specialists/google_sommelier.cpp   # Drive/Gmail/Calendar bridge (bearer token)
     # — voice I/O —
     specialists/echo_ear.cpp
     specialists/echo_mouth.cpp

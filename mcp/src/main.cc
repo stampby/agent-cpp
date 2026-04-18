@@ -49,7 +49,6 @@ std::unique_ptr<Agent> make_muse();
 std::unique_ptr<Agent> make_sommelier();
 std::unique_ptr<Agent> make_echo_mouth();
 std::unique_ptr<Agent> make_quartermaster();
-std::unique_ptr<Agent> make_google_sommelier();
 }  // namespace rocm_cpp::agents::specialists
 
 namespace {
@@ -108,8 +107,7 @@ int main() {
     maybe_register("muse",          rocm_cpp::agents::specialists::make_muse());
     maybe_register("sommelier",     rocm_cpp::agents::specialists::make_sommelier());
     maybe_register("echo_mouth",    rocm_cpp::agents::specialists::make_echo_mouth());
-    maybe_register("quartermaster",    rocm_cpp::agents::specialists::make_quartermaster());
-    maybe_register("google_sommelier", rocm_cpp::agents::specialists::make_google_sommelier());
+    maybe_register("quartermaster", rocm_cpp::agents::specialists::make_quartermaster());
 
     runtime.set_audit("scribe");   // journal every routed message through scribe
 
