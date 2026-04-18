@@ -45,6 +45,7 @@ add_executable(halo_mcp
 target_include_directories(halo_mcp PRIVATE include)
 target_link_libraries(halo_mcp PRIVATE
     agent_cpp_core
+    agent_cpp_specialists
     nlohmann_json::nlohmann_json
 )
 target_compile_features(halo_mcp PRIVATE cxx_std_20)

@@ -1,31 +1,51 @@
-// halo-mcp — Phase 1. Real bus bridge.
+// halo-mcp — Phase 1.5. Bus bridge + read-only specialists.
 //
 // Lifecycle:
-//   1. Build a Runtime with a BusBridge registered as "halo-mcp-bridge".
-//      Phase 1 doesn't register the specialists themselves — that happens
-//      when halo-mcp is linked into the same process as agent_cpp, OR we
-//      add an IPC hop to a running halo-agent.service (next iteration).
+//   1. Build a Runtime with:
+//        - BusBridge registered as "halo-mcp-bridge"
+//        - scribe, librarian, cartograph, sentinel (read-only subset)
+//      Write specialists (quartermaster, magistrate, herald, anvil) are
+//      NOT registered here — they'll land in Phase 2 behind CVG gating.
 //   2. Start the Runtime on a background thread.
 //   3. Run the stdio JSON-RPC 2.0 loop on the main thread. tools/call
 //      flows through bridge.send_request(target, kind, args_json).
 //   4. On EOF or signal: runtime.shutdown(), join, exit.
+//
+// Disable specific specialists via HALO_MCP_DISABLE=comma,separated,names.
 
 #include "halo_mcp/bus_bridge.hpp"
 #include "halo_mcp/stdio_server.hpp"
 #include "halo_mcp/tool_registry.hpp"
 
+#include "agents/agent.h"
 #include "agents/runtime.h"
 
 #include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
+#include <string>
 #include <thread>
+#include <unordered_set>
 
 using nlohmann::json;
+using rocm_cpp::agents::Agent;
 using rocm_cpp::agents::Runtime;
+
+// Forward-declare the specialist factories we want. Each lives in a .cpp
+// under agent-cpp/specialists/ and is linked via agent_cpp_specialists.
+namespace rocm_cpp::agents::specialists {
+std::unique_ptr<Agent> make_scribe();
+std::unique_ptr<Agent> make_librarian();
+std::unique_ptr<Agent> make_cartograph();
+std::unique_ptr<Agent> make_sentinel();
+std::unique_ptr<Agent> make_forge();
+std::unique_ptr<Agent> make_warden();
+}  // namespace rocm_cpp::agents::specialists
 
 namespace {
 
@@ -50,7 +70,38 @@ int main() {
 
     Runtime runtime;
     runtime.register_agent(std::move(bridge_owned));
-    runtime.set_audit("scribe");   // no-op if scribe isn't registered in this process
+
+    // Read-only specialist subset — safe to host inside halo-mcp directly.
+    // Write-side specialists (quartermaster, magistrate, herald, anvil) are
+    // deliberately NOT registered here; they arrive in Phase 2 behind CVG.
+    std::unordered_set<std::string> disabled;
+    if (const char* v = std::getenv("HALO_MCP_DISABLE")) {
+        std::string s = v;
+        size_t start = 0;
+        while (start < s.size()) {
+            size_t end = s.find(',', start);
+            std::string tok = s.substr(start, (end == std::string::npos) ? std::string::npos : end - start);
+            if (!tok.empty()) disabled.insert(tok);
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+    }
+    auto maybe_register = [&](const char* name, std::unique_ptr<Agent> a) {
+        if (disabled.count(name)) {
+            std::fprintf(stderr, "[halo-mcp] specialist %s disabled via HALO_MCP_DISABLE\n", name);
+            return;
+        }
+        runtime.register_agent(std::move(a));
+        std::fprintf(stderr, "[halo-mcp] registered %s\n", name);
+    };
+    maybe_register("scribe",      rocm_cpp::agents::specialists::make_scribe());
+    maybe_register("librarian",   rocm_cpp::agents::specialists::make_librarian());
+    maybe_register("cartograph",  rocm_cpp::agents::specialists::make_cartograph());
+    maybe_register("sentinel",    rocm_cpp::agents::specialists::make_sentinel());
+    maybe_register("warden",      rocm_cpp::agents::specialists::make_warden());
+    maybe_register("forge",       rocm_cpp::agents::specialists::make_forge());
+
+    runtime.set_audit("scribe");   // journal every routed message through scribe
 
     g_runtime = &runtime;
     std::signal(SIGTERM, on_signal);

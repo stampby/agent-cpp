@@ -18,223 +18,111 @@ std::vector<Tool> ToolRegistry::all() const {
     return out;
 }
 
+// Phase 1.5 registry — only tools that map to a real specialist handler.
+//
+// Read-only surface across scribe + cartograph. Librarian and sentinel are
+// event-driven (react to webhooks/Discord events) not query-driven, so
+// they don't get MCP tools here; they'll expose tools in Phase 2 once we
+// either add query-style handlers or wrap them with a reflective adapter.
+// Write specialists (herald/quartermaster/magistrate/anvil) arrive in
+// Phase 2 behind the CVG gate.
 ToolRegistry make_default_registry() {
     using nlohmann::json;
     ToolRegistry r;
 
+    // ── cartograph (semantic memory) ─────────────────────────────────
     r.register_tool(Tool{
-        .name = "scribe_recall",
-        .description = "Retrieve the last N messages from the session audit log.",
+        .name = "cartograph_remember",
+        .description = "Store a piece of text in cartograph's semantic memory with optional tags.",
         .input_schema = json{
             {"type", "object"},
-            {"properties", {{"n", {{"type", "integer"}, {"default", 20}}}}},
-            {"required", json::array()},
+            {"properties", {
+                {"text", {{"type", "string"}}},
+                {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+            }},
+            {"required", json::array({"text"})},
         },
-        .target_agent = "scribe",
+        .target_agent = "cartograph",
+        .message_kind = "remember",
+        .is_write = true,
+    });
+
+    r.register_tool(Tool{
+        .name = "cartograph_recall",
+        .description = "Retrieve k memories from cartograph ranked by similarity to the query.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"query", {{"type", "string"}}},
+                {"k", {{"type", "integer"}, {"default", 3}, {"minimum", 1}, {"maximum", 32}}},
+            }},
+            {"required", json::array({"query"})},
+        },
+        .target_agent = "cartograph",
         .message_kind = "recall",
         .is_write = false,
     });
 
     r.register_tool(Tool{
-        .name = "librarian_lookup",
-        .description = "Look up a document or passage from the local knowledge base.",
+        .name = "cartograph_forget_all",
+        .description = "WIPE all cartograph memory. Destructive. CVG-gated in Phase 2; currently unrestricted.",
         .input_schema = json{
             {"type", "object"},
-            {"properties", {
-                {"query", {{"type", "string"}}},
-                {"top_k", {{"type", "integer"}, {"default", 5}}},
-            }},
-            {"required", json::array({"query"})},
-        },
-        .target_agent = "librarian",
-        .message_kind = "lookup",
-        .is_write = false,
-    });
-
-    r.register_tool(Tool{
-        .name = "cartograph_repo_map",
-        .description = "Produce a structural map of the current repository.",
-        .input_schema = json{
-            {"type", "object"},
-            {"properties", {{"path", {{"type", "string"}, {"default", "."}}}}},
+            {"properties", json::object()},
             {"required", json::array()},
         },
         .target_agent = "cartograph",
-        .message_kind = "map",
-        .is_write = false,
-    });
-
-    r.register_tool(Tool{
-        .name = "sentinel_discord_read",
-        .description = "Read recent messages from a Discord channel.",
-        .input_schema = json{
-            {"type", "object"},
-            {"properties", {
-                {"channel_id", {{"type", "string"}}},
-                {"limit", {{"type", "integer"}, {"default", 50}}},
-            }},
-            {"required", json::array({"channel_id"})},
-        },
-        .target_agent = "sentinel",
-        .message_kind = "read_discord",
-        .is_write = false,
-    });
-
-    // ── GitHub (quartermaster / magistrate / librarian) ────────────────
-    // Routed through the existing GitHub specialists in agent-cpp. Write
-    // tools (create_issue, comment) gated by CVG on remote calls.
-
-    r.register_tool(Tool{
-        .name = "github_search_repo",
-        .description = "Search across a repository: code, issues, PRs, or commits.",
-        .input_schema = json{
-            {"type", "object"},
-            {"properties", {
-                {"repo", {{"type", "string"}, {"description", "owner/repo"}}},
-                {"query", {{"type", "string"}}},
-                {"kind", {{"type", "string"}, {"enum", {"code", "issues", "prs", "commits"}}, {"default", "code"}}},
-                {"limit", {{"type", "integer"}, {"default", 20}}},
-            }},
-            {"required", json::array({"repo", "query"})},
-        },
-        .target_agent = "librarian",
-        .message_kind = "github_search",
-        .is_write = false,
-    });
-
-    r.register_tool(Tool{
-        .name = "github_list_prs",
-        .description = "List pull requests for a repo, with state and review status.",
-        .input_schema = json{
-            {"type", "object"},
-            {"properties", {
-                {"repo", {{"type", "string"}}},
-                {"state", {{"type", "string"}, {"enum", {"open", "closed", "all"}}, {"default", "open"}}},
-            }},
-            {"required", json::array({"repo"})},
-        },
-        .target_agent = "librarian",
-        .message_kind = "github_list_prs",
-        .is_write = false,
-    });
-
-    r.register_tool(Tool{
-        .name = "github_review_pr",
-        .description = "Review a pull request — read diff, comments, CI status. Read-only.",
-        .input_schema = json{
-            {"type", "object"},
-            {"properties", {
-                {"repo", {{"type", "string"}}},
-                {"pr_number", {{"type", "integer"}}},
-            }},
-            {"required", json::array({"repo", "pr_number"})},
-        },
-        .target_agent = "magistrate",
-        .message_kind = "review_pr",
-        .is_write = false,
-    });
-
-    r.register_tool(Tool{
-        .name = "github_create_issue",
-        .description = "Create a new issue on a repo. Write — CVG-gated; deny-by-default for remote callers.",
-        .input_schema = json{
-            {"type", "object"},
-            {"properties", {
-                {"repo", {{"type", "string"}}},
-                {"title", {{"type", "string"}}},
-                {"body", {{"type", "string"}}},
-                {"labels", {{"type", "array"}, {"items", {{"type", "string"}}}}},
-            }},
-            {"required", json::array({"repo", "title"})},
-        },
-        .target_agent = "quartermaster",
-        .message_kind = "create_issue",
+        .message_kind = "forget_all",
         .is_write = true,
     });
 
+    // ── forge + warden (CVG-gated tool dispatch) ─────────────────────
+    // Single entry point that covers every tool forge knows about.
+    // Currently: echo, clock, which. Each call passes through warden's
+    // exec_request / exec_allow policy before forge dispatches.
     r.register_tool(Tool{
-        .name = "github_comment",
-        .description = "Post a comment on an issue or PR. Write — CVG-gated.",
+        .name = "forge_exec",
+        .description = "Invoke a forge-registered tool through the warden CVG gate. "
+                       "Current tools: echo, clock, which. Use args to pass parameters. "
+                       "Set reason to a short human-readable string — warden logs and gates on it.",
         .input_schema = json{
             {"type", "object"},
             {"properties", {
-                {"repo", {{"type", "string"}}},
-                {"number", {{"type", "integer"}}},
-                {"body", {{"type", "string"}}},
+                {"tool", {{"type", "string"}, {"description", "one of: echo, clock, which"}}},
+                {"args", {{"type", "object"}, {"description", "per-tool arguments (echo: {text}, clock: {}, which: {bin})"}}},
+                {"reason", {{"type", "string"}, {"description", "why this call is being made — logged by warden"}}},
             }},
-            {"required", json::array({"repo", "number", "body"})},
+            {"required", json::array({"tool", "reason"})},
         },
-        .target_agent = "quartermaster",
-        .message_kind = "comment",
-        .is_write = true,
+        .target_agent = "forge",
+        .message_kind = "tool_call",
+        .is_write = true,   // forge can run side-effectful tools; warden gates
     });
 
-    // ── Google (sommelier → external APIs) ────────────────────────────
-    // Sommelier is the existing specialist that handles external paid APIs.
-    // We route Google Drive / Gmail / Calendar through it so credentials
-    // stay in one place and OAuth lifecycle is centralized.
-
+    // ── scribe (audit journal) ───────────────────────────────────────
     r.register_tool(Tool{
-        .name = "google_drive_search",
-        .description = "Search files in Google Drive by name, content, or metadata.",
+        .name = "scribe_new_session",
+        .description = "Rotate the audit log — close the current session, open a new one.",
         .input_schema = json{
             {"type", "object"},
-            {"properties", {
-                {"query", {{"type", "string"}}},
-                {"limit", {{"type", "integer"}, {"default", 20}}},
-                {"mime_type", {{"type", "string"}, {"description", "optional filter (e.g. application/pdf)"}}},
-            }},
-            {"required", json::array({"query"})},
-        },
-        .target_agent = "sommelier",
-        .message_kind = "gdrive_search",
-        .is_write = false,
-    });
-
-    r.register_tool(Tool{
-        .name = "google_drive_read",
-        .description = "Read the text contents of a Google Drive file (Docs, Sheets, text, PDF).",
-        .input_schema = json{
-            {"type", "object"},
-            {"properties", {
-                {"file_id", {{"type", "string"}}},
-            }},
-            {"required", json::array({"file_id"})},
-        },
-        .target_agent = "sommelier",
-        .message_kind = "gdrive_read",
-        .is_write = false,
-    });
-
-    r.register_tool(Tool{
-        .name = "google_gmail_search",
-        .description = "Search Gmail messages with Gmail query syntax (from:, subject:, has:attachment, etc.).",
-        .input_schema = json{
-            {"type", "object"},
-            {"properties", {
-                {"query", {{"type", "string"}}},
-                {"limit", {{"type", "integer"}, {"default", 20}}},
-            }},
-            {"required", json::array({"query"})},
-        },
-        .target_agent = "sommelier",
-        .message_kind = "gmail_search",
-        .is_write = false,
-    });
-
-    r.register_tool(Tool{
-        .name = "google_calendar_upcoming",
-        .description = "List upcoming events from Google Calendar within a time window.",
-        .input_schema = json{
-            {"type", "object"},
-            {"properties", {
-                {"calendar_id", {{"type", "string"}, {"default", "primary"}}},
-                {"hours_ahead", {{"type", "integer"}, {"default", 24}}},
-            }},
+            {"properties", json::object()},
             {"required", json::array()},
         },
-        .target_agent = "sommelier",
-        .message_kind = "gcal_upcoming",
+        .target_agent = "scribe",
+        .message_kind = "session_new",
+        .is_write = true,
+    });
+
+    r.register_tool(Tool{
+        .name = "scribe_where",
+        .description = "Report the filesystem path of the current session's audit log.",
+        .input_schema = json{
+            {"type", "object"},
+            {"properties", json::object()},
+            {"required", json::array()},
+        },
+        .target_agent = "scribe",
+        .message_kind = "session_where",
         .is_write = false,
     });
 
