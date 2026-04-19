@@ -1,6 +1,6 @@
 // gateway — HTTP ingestion endpoint for the agent bus.
 //
-// One job: listen on :8081, accept POST /bus/:to with a JSON body,
+// One job: listen on :8090, accept POST /bus/:to with a JSON body,
 // convert to a Message, and send() it onto the bus. Makes agent-cpp
 // reachable from third-party apps, cron jobs, webhooks — anything
 // that can curl.
@@ -23,7 +23,7 @@
 //       resp : 200 {"ok": true, "specialists": <count>}
 //
 // Env :
-//   AGENT_CPP_GATEWAY_PORT     default 8081
+//   AGENT_CPP_GATEWAY_PORT     default 8090
 //   AGENT_CPP_GATEWAY_BIND     default 127.0.0.1 (loopback only)
 //   AGENT_CPP_GATEWAY_TOKEN    optional bearer, strongly recommended
 //   AGENT_CPP_GATEWAY_RATE     optional, default "30/10" (N req / N sec)
@@ -50,7 +50,7 @@ class Gateway : public Agent {
 public:
     Gateway() {
         const char* p = std::getenv("AGENT_CPP_GATEWAY_PORT");
-        port_ = (p && *p) ? std::atoi(p) : 8081;
+        port_ = (p && *p) ? std::atoi(p) : 8090;
         const char* b = std::getenv("AGENT_CPP_GATEWAY_BIND");
         bind_ = (b && *b) ? b : "127.0.0.1";
         if (const char* t = std::getenv("AGENT_CPP_GATEWAY_TOKEN"); t && *t)
@@ -89,7 +89,7 @@ public:
 private:
     std::string        name_  = "gateway";
     std::string        bind_  = "127.0.0.1";
-    int                port_  = 8081;
+    int                port_  = 8090;
     std::string        token_;                 // empty = no auth
     int                rate_max_    = 30;      // req per window
     int                rate_window_ = 10;      // seconds
