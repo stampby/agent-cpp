@@ -59,8 +59,8 @@ std::string b64_encode(const std::string& in) {
 
 void split_url(const std::string& url, std::string& host, int& port, bool& https) {
     std::string u = url; https = false;
-    if (u.rfind("http://",  0) == 0) { u.erase(0, 7); https = false; }
     if (u.rfind("https://", 0) == 0) { u.erase(0, 8); https = true;  }
+    else if (u.rfind("http://",  0) == 0) { u.erase(0, 7); https = false; }
     auto slash = u.find('/'); if (slash != std::string::npos) u = u.substr(0, slash);
     auto colon = u.find(':');
     if (colon == std::string::npos) { host = u; port = https ? 443 : 80; }
@@ -106,6 +106,17 @@ public:
             }
             text  = j.value("text",  std::string(""));
             voice = j.value("voice", voice_);
+            // Validate voice — it becomes part of a filesystem path below.
+            // Reject anything outside [A-Za-z0-9_-]+ to block traversal /
+            // shell-metacharacter injection.
+            for (char c : voice) {
+                if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')) {
+                    err_(rt, msg, std::string("invalid voice id: '") + voice + "'"); return;
+                }
+            }
+            if (voice.empty() || voice.size() > 32) {
+                err_(rt, msg, "voice must be 1..32 chars"); return;
+            }
             if (j.contains("speed") && j["speed"].is_number()) {
                 speed = j["speed"].get<double>();
                 has_speed = true;

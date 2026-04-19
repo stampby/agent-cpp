@@ -63,8 +63,8 @@ std::string b64_decode(const std::string& in) {
 
 void split_url(const std::string& url, std::string& host, int& port, bool& https) {
     std::string u = url; https = false;
-    if (u.rfind("http://",  0) == 0) { u.erase(0, 7); https = false; }
     if (u.rfind("https://", 0) == 0) { u.erase(0, 8); https = true;  }
+    else if (u.rfind("http://",  0) == 0) { u.erase(0, 7); https = false; }
     auto slash = u.find('/'); if (slash != std::string::npos) u = u.substr(0, slash);
     auto colon = u.find(':');
     if (colon == std::string::npos) { host = u; port = https ? 443 : 80; }
