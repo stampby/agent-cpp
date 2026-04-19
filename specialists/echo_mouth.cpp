@@ -1,23 +1,29 @@
-// echo_mouth — text-to-speech bridge (Kokoro backend).
+// echo_mouth — text-to-speech bridge (halo-kokoro backend).
 //
 // One job: take model output text and speak it via the local
-// kokoro-tts.service. v1 writes the WAV to a temp path and emits
-// "tts_done" with that path plus a base64 copy for bus consumers
-// (visualizer, Discord upload). Streaming is v2 — the current Kokoro
-// server returns a complete WAV.
+// halo-kokoro server (Bun shim over kokoro_tts CLI). v1 writes the WAV
+// to a temp path and emits "tts_done" with that path plus a base64 copy
+// for bus consumers (visualizer, Discord upload). Streaming is v2 —
+// the current Kokoro server returns a complete WAV.
+//
+// halo-kokoro contract (server.ts on :8083):
+//   POST /tts            {"text": "...", "voice": "af_sky", "speed": 1.0}
+//                        -> 200 audio/wav (raw body)
+//   GET  /healthz        -> "ok"
+//   GET  /voices         -> {"voices": [...], "default": "af_sky"}
 //
 // Contract:
 //   listens for :
-//     "tts_say"    {text, voice?}     (explicit — most common)
-//     "muse_reply" <text>             (implicit path — if TTS_AUTO_MUSE=1)
-//     "tts_stop"                      (reserved; no streaming yet)
+//     "tts_say"    {text, voice?, speed?}   (explicit — most common)
+//     "muse_reply" <text>                    (implicit — if TTS_AUTO_MUSE=1)
+//     "tts_stop"                             (reserved; no streaming yet)
 //   emits :
-//     "tts_done"   {path, audio_b64, bytes, voice} → to msg.from
-//     "tts_error"  {error}                         → to msg.from
+//     "tts_done"   {path, audio_b64, bytes, voice} -> to msg.from
+//     "tts_error"  {error}                         -> to msg.from
 //
 // Env:
-//   KOKORO_URL        override (default http://127.0.0.1:5000)
-//   KOKORO_VOICE      default voice (default "af_heart")
+//   KOKORO_URL        override (default http://127.0.0.1:8083)
+//   KOKORO_VOICE      default voice (default "af_sky")
 //   TTS_AUTO_MUSE     if "1", speak every muse_reply automatically.
 
 #include "agents/agent.h"
@@ -78,9 +84,9 @@ class EchoMouth : public Agent {
 public:
     EchoMouth() {
         const char* u = std::getenv("KOKORO_URL");
-        url_   = (u && *u) ? u : "http://127.0.0.1:5000";
+        url_   = (u && *u) ? u : "http://127.0.0.1:8083";
         const char* v = std::getenv("KOKORO_VOICE");
-        voice_ = (v && *v) ? v : "af_heart";
+        voice_ = (v && *v) ? v : "af_sky";
         const char* a = std::getenv("TTS_AUTO_MUSE");
         auto_muse_ = (a && *a && std::string(a) != "0");
     }
@@ -89,6 +95,8 @@ public:
 
     void handle(const Message& msg, Runtime& rt) override {
         std::string text, voice = voice_;
+        double speed = 1.0;
+        bool has_speed = false;
 
         if (msg.kind == "tts_say") {
             nlohmann::json j;
@@ -98,6 +106,10 @@ public:
             }
             text  = j.value("text",  std::string(""));
             voice = j.value("voice", voice_);
+            if (j.contains("speed") && j["speed"].is_number()) {
+                speed = j["speed"].get<double>();
+                has_speed = true;
+            }
         } else if (msg.kind == "muse_reply") {
             if (!auto_muse_) return;    // opt-in to prevent noisy dev
             text = msg.payload;
@@ -113,6 +125,7 @@ public:
         cli.set_read_timeout(120);
         httplib::Headers headers{{"Content-Type", "application/json"}};
         nlohmann::json body = {{"text", text}, {"voice", voice}};
+        if (has_speed) body["speed"] = speed;
 
         auto res = cli.Post("/tts", headers, body.dump(), "application/json");
         if (!res) { err_(rt, msg, "kokoro unreachable at " + url_); return; }

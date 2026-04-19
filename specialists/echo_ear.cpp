@@ -1,18 +1,26 @@
-// echo_ear — speech-to-text bridge (faster-whisper backend).
+// echo_ear — speech-to-text bridge (whisper.cpp whisper-server backend).
 //
-// One job: turn audio bytes into text. Caller hands us a WAV payload
-// (base64 on the bus) or a path to a WAV on disk plus an optional
+// One job: turn audio bytes into text. Caller hands us a WAV/OGG/FLAC
+// payload (base64 on the bus) or a path on disk plus an optional
 // language hint; we POST multipart to the local whisper-server.service
 // and emit user_said with the transcript.
 //
+// whisper-server contract (verified live 2026-04-19 on :8082):
+//   POST /inference   multipart/form-data
+//     file              audio bytes (WAV/OGG/FLAC)
+//     response_format   "json" | "text" | "verbose_json"
+//     temperature       (optional)
+//     language          (optional ISO-639-1, "auto" for detect)
+//   returns 200 JSON: {"text": "..."} when response_format=json
+//
 // Contract:
 //   listens for :
-//     "mic_wav_b64"   {audio_b64, language?}       (in-memory path)
-//     "mic_wav_path"  {path, language?}            (file path on disk)
+//     "mic_wav_b64"   {audio_b64, format?: "wav"|"ogg"|"flac", language?}
+//     "mic_wav_path"  {path, format?, language?}
 //     "mic_eou"                                     (reserved for streaming v2)
 //   emits :
-//     "user_said"     <transcript>                 → to msg.from
-//     "stt_error"     {error}                      → to msg.from
+//     "user_said"     <transcript>                 -> to msg.from
+//     "stt_error"     {error}                      -> to msg.from
 //
 // Env:
 //   WHISPER_URL   override for whisper-server (default http://127.0.0.1:8082)
@@ -20,6 +28,8 @@
 #include "agents/agent.h"
 #include "agents/runtime.h"
 
+#include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
@@ -81,21 +91,38 @@ public:
             err_(rt, msg, std::string("bad JSON: ") + e.what()); return;
         }
 
-        std::string wav;
+        std::string audio;
+        std::string format = j.value("format", std::string("wav"));
         if (msg.kind == "mic_wav_b64") {
             std::string enc = j.value("audio_b64", std::string(""));
             if (enc.empty()) { err_(rt, msg, "audio_b64 required"); return; }
-            wav = b64_decode(enc);
+            audio = b64_decode(enc);
         } else {
             std::string path = j.value("path", std::string(""));
             if (path.empty()) { err_(rt, msg, "path required"); return; }
             std::ifstream f(path, std::ios::binary);
             if (!f) { err_(rt, msg, "cannot read " + path); return; }
-            std::ostringstream ss; ss << f.rdbuf(); wav = ss.str();
+            std::ostringstream ss; ss << f.rdbuf(); audio = ss.str();
+            // Best-effort format sniff from extension if caller didn't set it.
+            if (!j.contains("format")) {
+                auto dot = path.rfind('.');
+                if (dot != std::string::npos) {
+                    std::string ext = path.substr(dot + 1);
+                    for (auto& c : ext) c = static_cast<char>(std::tolower(c));
+                    if (ext == "wav" || ext == "ogg" || ext == "flac") format = ext;
+                }
+            }
         }
-        if (wav.empty()) { err_(rt, msg, "empty audio"); return; }
+        if (audio.empty()) { err_(rt, msg, "empty audio"); return; }
 
         std::string language = j.value("language", std::string("en"));
+
+        // Map format -> mime + filename. whisper-server sniffs by header,
+        // but sending a correct Content-Type keeps logs clean.
+        std::string mime = "audio/wav";
+        std::string fname = "audio.wav";
+        if      (format == "ogg")  { mime = "audio/ogg";  fname = "audio.ogg";  }
+        else if (format == "flac") { mime = "audio/flac"; fname = "audio.flac"; }
 
         std::string host; int port; bool https;
         split_url(url_, host, port, https);
@@ -103,24 +130,57 @@ public:
         cli.set_connection_timeout(5);
         cli.set_read_timeout(60);
 
+        // whisper-server wants the audio under field name "file" and expects
+        // a "response_format" field to pick the wire format.
         httplib::MultipartFormDataItems items = {
-            {"audio",    wav,      "audio.wav", "audio/wav"},
-            {"language", language, "",          ""},
+            {"file",            audio,    fname, mime},
+            {"response_format", "json",   "",    ""},
+            {"language",        language, "",    ""},
+            {"temperature",     "0.0",    "",    ""},
         };
-        auto res = cli.Post("/transcribe", items);
+        auto res = cli.Post("/inference", items);
         if (!res) { err_(rt, msg, "whisper-server unreachable at " + url_); return; }
         if (res->status < 200 || res->status >= 300) {
             err_(rt, msg, "whisper HTTP " + std::to_string(res->status)
                        + ": " + res->body.substr(0, 200));
             return;
         }
+
+        // whisper-server returns {"text": "..."} in JSON mode. Some builds
+        // also include segments[] with per-chunk timings and avg_logprob;
+        // if present, surface the mean probability as a confidence proxy.
         std::string text;
-        try { text = nlohmann::json::parse(res->body).value("text", std::string("")); }
-        catch (const std::exception& e) {
+        double confidence = -1.0;
+        try {
+            auto parsed = nlohmann::json::parse(res->body);
+            text = parsed.value("text", std::string(""));
+            if (parsed.contains("segments") && parsed["segments"].is_array()
+                && !parsed["segments"].empty()) {
+                double sum = 0.0; int n = 0;
+                for (const auto& seg : parsed["segments"]) {
+                    if (seg.contains("avg_logprob") && seg["avg_logprob"].is_number()) {
+                        sum += std::exp(seg["avg_logprob"].get<double>());
+                        ++n;
+                    }
+                }
+                if (n > 0) confidence = sum / n;
+            }
+        } catch (const std::exception& e) {
             err_(rt, msg, std::string("parse: ") + e.what()); return;
         }
+        // Trim a leading space that whisper likes to emit.
+        while (!text.empty() && (text.front() == ' ' || text.front() == '\n'))
+            text.erase(text.begin());
+
+        // Keep the legacy "user_said" wire contract for existing listeners
+        // (muse consumes raw transcript text), and also emit a structured
+        // event so voice-UI specialists can react to confidence.
         rt.send({.from=name_, .to=msg.from,
                  .kind="user_said", .payload=text});
+        nlohmann::json out = {{"text", text}};
+        if (confidence >= 0.0) out["confidence"] = confidence;
+        rt.send({.from=name_, .to=msg.from,
+                 .kind="stt_result", .payload=out.dump()});
     }
 
 private:
